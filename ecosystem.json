@@ -1,0 +1,15 @@
+{
+  "apps" : [{
+    "name"        : "piradio",
+    "script"      : "./index.js",
+    "ignore_watch": ["README.md"],
+    "log_date_format" : "YYYY-MM-DD HH:mm Z",
+    "env": {
+      "NODE_ENV": "DEVELOPMENT"
+    },
+    "env_production" : {
+       "NODE_ENV": "PRODUCTION"
+    }
+  }]
+}
+
