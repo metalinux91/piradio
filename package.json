@@ -9,7 +9,6 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "node-mp3-player": "^1.0.3",
     "player": "^0.6.1",
     "socket.io-client": "^2.1.1"
   }
