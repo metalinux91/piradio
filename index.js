@@ -30,7 +30,7 @@ function playerLogs () {
 
     // if about to play a commercial, raise the volume, otherwise lower it
     if (item._name.indexOf('Spot') !== -1) {
-        spawn('amixer', [...amixerArray, '0dB']);
+        spawn('amixer', [...amixerArray, '-1dB']);
     } else {
         spawn('amixer', [...amixerArray, '-10dB']);
     }
