@@ -1,5 +1,7 @@
+const { spawn } = require('child_process');
 const io = require('socket.io-client');
 const Player = require('player');
+
 const pharmacy = require('/boot/pharmacy.json');
 
 // const socket = io('http://192.168.2.104:9012', { path: '/piradio' });
@@ -10,25 +12,32 @@ let playlist;
 let connected = false;
 let playing = false;
 let paused = false;
-let busy = false;
 let interval = null;
 let fetchingSong = false;
+const amixerArray = ['-c', '0', '--', 'sset', 'PCM', 'playback'];
 
 function playerLogs () {
   // event: on playend
-  player.on('playend', function(item) {
-    console.log(pharmacy.ANF + ': play done, switching to next one...');
+  player.on('playend', () => {
+    console.log(`${pharmacy.ANF}: play done, switching to next one...`);
   });
 
   // event: on playing
-  player.on('playing', function(item) {
+  player.on('playing', (item) => {
     fetchingSong = false;
-    console.log(pharmacy.ANF + ': playing ' + item._name);
+    console.log(`${pharmacy.ANF}: playing ${item._name}`);
     socket.emit('playing', pharmacy.ANF, item);
+
+    // if about to play a commercial, raise the volume, otherwise lower it
+    if (item._name.indexOf('Spot') !== -1) {
+        spawn('amixer', [...amixerArray, '0dB']);
+    } else {
+        spawn('amixer', [...amixerArray, '-10dB']);
+    }
   });
 
   // event: on error
-  player.on('error', function(err) {
+  player.on('error', (err) => {
     // when error occurs
     if (err.toString() === 'No next song was found') {
       console.log('Reached end of playlist. Restarting...');
@@ -41,7 +50,7 @@ function playerLogs () {
 
 // event: on connect
 socket.on('connect', () => {
-  console.log(pharmacy.ANF + ': Connected to main server');
+  console.log(`${pharmacy.ANF}: Connected to main server`);
   connected = true;
 
   if (interval !== null) {
@@ -54,8 +63,8 @@ socket.on('connect', () => {
 
 // event: on disconnect
 socket.on('disconnect', () => {
-  console.log(pharmacy.ANF + ': Disconnected from server. Trying to reconnect...');
-
+  console.log(`${pharmacy.ANF}: Disconnected from server. Trying to reconnect...`);
+ 
   connected = false;
 
   // try to reconnect to the server
@@ -72,14 +81,14 @@ socket.on('disconnect', () => {
 // event: on play
 socket.on('play', (msg) => {
   if (fetchingSong) {
-    console.log(pharmacy.ANF + ': is still fetching song to play...');
+    console.log(`${pharmacy.ANF}: is still fetching song to play...`);
     return;
   }
 
   if (playing) {
-    console.log(pharmacy.ANF + ': received request to play from server. Restarting playlist or playing new one from the beginning'); 
+    console.log(`${pharmacy.ANF}: received request to play from server. Restarting playlist or playing new one from the beginning`); 
   } else {
-    console.log(pharmacy.ANF + ': received request to play from server');
+    console.log(`${pharmacy.ANF}: received request to play from server`);
   }
 
   playlist = msg.playlist;
@@ -95,125 +104,75 @@ socket.on('play', (msg) => {
   playing = true;
   player.play();
 
-  busy = true;
-  setTimeout(() => {
-    busy = false; 
-  }, 3000);
-
   // log activity
   playerLogs();
-
-  /*
-  if (msg.skip > 0) {
-    for (var i = 0; i < msg.skip; i++) {
-      setTimeout(function() {
-        player.next();
-      }, 2000 * i);
-    }
-  }
-  */
 });
 
 // event: on stop
-socket.on('stop', (msg) => {
+socket.on('stop', () => {
   if (!playing) {
-    console.log(pharmacy.ANF + ': received request to stop from server, but was already stopped');
+    console.log(`${pharmacy.ANF}: received request to stop from server, but was already stopped`);
   } else {
-    console.log(pharmacy.ANF + ': received request to stop from server');
+    console.log(`${pharmacy.ANF}: received request to stop from server`);
 
     playing = false;
     player.stop();
-
-    busy = true;
-    setTimeout(function() {
-      busy = false; 
-    }, 3000);
   }
 });
 
 // event: on pause
-socket.on('pause', (msg) => {
+socket.on('pause', () => {
   if (paused) {
-    console.log(pharmacy.ANF + ': received request to pause from server, but was already paused');
+    console.log(`${pharmacy.ANF}: received request to pause from server, but was already paused`);
 
     paused = true;
   } else {
-    console.log(pharmacy.ANF + ': received request to pause from server');
+    console.log(`${pharmacy.ANF}: received request to pause from server`);
 
     paused = true;
     player.pause();
-
-    busy = true;
-    setTimeout(function() {
-      busy = false; 
-    }, 3000);
   }
 });
 
 // event: on resume
-socket.on('resume', (msg) => {
+socket.on('resume', () => {
   if (!paused) {
-    console.log(pharmacy.ANF + ': received request to resume from server, but was already playing');
+    console.log(`${pharmacy.ANF}: received request to resume from server, but was already playing`);
   } else {
-    console.log(pharmacy.ANF + ': received request to resume from server');
+    console.log(`${pharmacy.ANF}: received request to resume from server`);
 
     paused = false;
     player.pause();
-
-    busy = true;
-    setTimeout(function() {
-      busy = false; 
-    }, 3000);
   }
-
-  // playerLogs(player);
 });
 
 // event: on next
-socket.on('next', (msg) => {
+socket.on('next', () => {
   if (fetchingSong) {
-    console.log(pharmacy.ANF + ': is still fetching song to play...');
+    console.log(`${pharmacy.ANF}: is still fetching song to play...`);
     return;
   }
 
-  console.log(pharmacy.ANF + ': received request to skip from server');
+  console.log(`${pharmacy.ANF}: received request to skip from server`);
 
    // resume the player when switching to the next song
    if (paused) paused = false;
 
    fetchingSong = true;
    player.next();
-
-   busy = true;
-   setTimeout(function() {
-     busy = false; 
-   }, 3000);
 });
 
-// event: on shuffle
-// socket.on('shuffle', (msg) => {
-//   console.log(pharmacy.ANF + ': received request to shuffle from server');
-// 
-//   if (player !== undefined) {
-//     player.stop();
-//   }
-//   
-//   player = new Player(playlist);
-// 
-//   playing = true;
-//   player.play();
-// });
 
 socket.on('shuffle', (msg) => {
   if (fetchingSong) {
-    console.log(pharmacy.ANF + ': is still fetching song to play...');
+    console.log(`${pharmacy.ANF}: is still fetching song to play...`);
     return;
   }
 
   if (playing) {
-    console.log(pharmacy.ANF + ': received request to play from server. Restarting playlist or playing new one from the beginning'); 
+    console.log(`${pharmacy.ANF}: received request to play from server. Restarting playlist or playing new one from the beginning`); 
   } else {
-    console.log(pharmacy.ANF + ': received request to play from server');
+    console.log(`${pharmacy.ANF}: received request to play from server`);
   }
 
   playlist = msg.playlist;
@@ -229,22 +188,7 @@ socket.on('shuffle', (msg) => {
   playing = true;
   player.play();
 
-  busy = true;
-  setTimeout(() => {
-    busy = false; 
-  }, 3000);
-
   // log activity
   playerLogs();
-
-  /*
-  if (msg.skip > 0) {
-    for (var i = 0; i < msg.skip; i++) {
-      setTimeout(function() {
-        player.next();
-      }, 2000 * i);
-    }
-  }
-  */
 });
 
