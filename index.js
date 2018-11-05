@@ -32,7 +32,7 @@ function playerLogs () {
     if (item._name.indexOf('Spot') !== -1) {
         spawn('amixer', [...amixerArray, '-1dB']);
     } else {
-        spawn('amixer', [...amixerArray, '-10dB']);
+        spawn('amixer', [...amixerArray, '-3dB']);
     }
   });
 
