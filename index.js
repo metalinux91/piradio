@@ -44,6 +44,7 @@ function playerLogs () {
       socket.emit('playlistEnd', pharmacy.ANF, playlist);
     } else {
       console.log({ pharmacy: pharmacy.ANF, message: err });
+      process.exit();
     }
   });
 }
