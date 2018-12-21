@@ -1,6 +1,10 @@
+const https = require('https');
+const fs = require('fs');
+const path = require('path');
 const { spawn } = require('child_process');
 const io = require('socket.io-client');
 const Player = require('player');
+const getSize = require('get-folder-size');
 
 const pharmacy = require('/boot/pharmacy.json');
 
@@ -16,6 +20,74 @@ let interval = null;
 let fetchingSong = false;
 const amixerArray = ['-c', '0', '--', 'sset', 'PCM', 'playback'];
 
+// helper function that gets the songs from the url
+function httpGet(url) {
+  return new Promise((resolve) => {
+    https.get(url, (res) => {
+      switch(res.statusCode) {
+      case 200:
+        resolve(res);
+        break;
+      case 302: // redirect
+        resolve(httpGet(res.headers.location));
+        break;
+      default:
+        resolve();
+      }
+    });
+  });
+}
+
+// this function recursively lists files in a directory
+const listFiles = (dir, done) => {
+  let results = [];
+
+  fs.readdir(dir, (err, list) => {
+    if (err) return done(err);
+
+    let pending = list.length;
+    if (!pending) return done (null, results);
+
+    list.forEach((file) => {
+      file = path.resolve(dir, file);
+      fs.stat(file, (err, stat) => {
+        if (stat && stat.isDirectory()) {
+          listFiles(file, (err, res) => {
+            results = results.concat(res);
+            if (!--pending) done(null, results);
+          });
+        } else {
+          results.push(file);
+          if (!--pending) done(null, results);
+        }
+      });
+    });
+  });
+};
+
+// since the process is restarted everyday by a system cronjob
+// remove the songs that have been cached over a month on restart
+listFiles('./cache', (err, files) => {
+  files.forEach((file) => {
+    fs.stat(file, (err, stat) => {
+      if (err) {
+        console.error(err);
+      } else {
+        const { birthtime } = stat;
+        const now = new Date();
+
+        if (now.getMonth() - birthtime.getMonth() > 0) {
+          try {
+            fs.unlinkSync(file);
+          } catch (error) {
+            console.error(error);
+          }
+        }
+      }
+    });
+  });
+});
+
 function playerLogs () {
   // event: on playend
   player.on('playend', () => {
@@ -30,9 +102,29 @@ function playerLogs () {
 
     // if about to play a commercial, raise the volume, otherwise lower it
     if (item._name.indexOf('Spot') !== -1) {
-        spawn('amixer', [...amixerArray, '-1dB']);
+      spawn('amixer', [...amixerArray, '-1dB']);
     } else {
-        spawn('amixer', [...amixerArray, '-3dB']);
+      spawn('amixer', [...amixerArray, '-3dB']);
+    }
+
+    // If the song is not cached and there are less than 5GB of cached songs, cache it
+    if (item.src.indexOf('http') !== -1) {
+      getSize('./cache', (err, size) => {
+        if (err) {
+          console.error(err);
+        } else  if (size < 5000000000) {
+          const playlistDir = `./cache/${item.src.split('/')[4]}`;
+          if (!fs.existsSync(playlistDir)) fs.mkdirSync(playlistDir);
+
+          const songFile = fs.createWriteStream(`${playlistDir}/${item._name}`);
+          httpGet(item.src)
+            .then(response => response.pipe(songFile))
+            .catch((err) => {
+              console.error(err);
+              process.exit();
+            });
+        }
+      });
     }
   });
 
@@ -99,7 +191,18 @@ socket.on('play', (msg) => {
     player.stop();
   }
 
-  player = new Player(playlist);
+  const finalPlaylist = [];
+
+  msg.playlistLocal.forEach((url, index) => {
+    try {
+      fs.statSync(url);
+      finalPlaylist.push(url);
+    } catch (err) {
+      finalPlaylist.push(msg.playlist[index]);
+    }
+  });
+
+  player = new Player(finalPlaylist);
 
   fetchingSong = true;
   playing = true;
@@ -156,11 +259,18 @@ socket.on('next', () => {
 
   console.log(`${pharmacy.ANF}: received request to skip from server`);
 
-   // resume the player when switching to the next song
-   if (paused) paused = false;
+  // resume the player when switching to the next song
+  if (paused) paused = false;
 
-   fetchingSong = true;
-   player.next();
+  fetchingSong = true;
+
+  /**
+   * since the player only stops the song that's currently being played
+   * shortly after skipping to the next one (thus causing overlap)
+   * pause it and set a timeout before skipping
+   */
+  player.pause();
+  setTimeout(() => player.next(), 2000);
 });
 
 

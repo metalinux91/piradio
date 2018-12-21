@@ -1,7 +1,7 @@
 {
-  "name": "workspace",
+  "name": "piradio",
   "version": "1.0.0",
-  "description": "",
+  "description": "Radio system for the maisfarmácia platform",
   "repository": {
     "type": "git",
     "url": "https://github.com/metalinux91/piradio"
@@ -10,9 +10,10 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "author": "",
+  "author": "João Coelho",
   "license": "ISC",
   "dependencies": {
+    "get-folder-size": "^2.0.0",
     "player": "^0.6.1",
     "socket.io-client": "^2.1.1"
   }
