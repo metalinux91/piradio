@@ -67,25 +67,29 @@ const listFiles = (dir, done) => {
 
 // since the process is restarted everyday by a system cronjob
 // remove the songs that have been cached over a month on restart
-listFiles('./cache', (err, files) => {
-  files.forEach((file) => {
-    fs.stat(file, (err, stat) => {
-      if (err) {
-        console.error(err);
-      } else {
-        const { birthtime } = stat;
-        const now = new Date();
-
-        if (now.getMonth() - birthtime.getMonth() > 0) {
-          try {
-            fs.unlinkSync(file);
-          } catch (error) {
-            console.error(error);
+fs.stat('../cache', (err, stat) => {
+  if (!err) {
+    listFiles('../cache', (err, files) => {
+      files.forEach((file) => {
+        fs.stat(file, (err, stat) => {
+          if (err) {
+            console.error(err);
+          } else {
+            const { birthtime } = stat;
+            const now = new Date();
+  
+            if (now.getMonth() - birthtime.getMonth() > 0) {
+              try {
+                fs.unlinkSync(file);
+              } catch (error) {
+                console.error(error);
+              }
+            }
           }
-        }
-      }
+        });
+      });
     });
-  });
+  }
 });
 
 function playerLogs () {
@@ -109,21 +113,27 @@ function playerLogs () {
 
     // If the song is not cached and there are less than 5GB of cached songs, cache it
     if (item.src.indexOf('http') !== -1) {
-      getSize('./cache', (err, size) => {
+      fs.stat('../cache', (err, stat) => {
         if (err) {
-          console.error(err);
-        } else  if (size < 5000000000) {
-          const playlistDir = `./cache/${item.src.split('/')[4]}`;
-          if (!fs.existsSync(playlistDir)) fs.mkdirSync(playlistDir);
-
-          const songFile = fs.createWriteStream(`${playlistDir}/${item._name}`);
-          httpGet(item.src)
-            .then(response => response.pipe(songFile))
-            .catch((err) => {
-              console.error(err);
-              process.exit();
-            });
+          fs.mkdirSync('../cache');
         }
+
+        getSize('../cache', (err, size) => {
+          if (err) {
+            console.error(err);
+          } else  if (size < 5000000000) {
+            const playlistDir = `../cache/${item.src.split('/')[4]}`;
+            if (!fs.existsSync(playlistDir)) fs.mkdirSync(playlistDir);
+  
+            const songFile = fs.createWriteStream(`${playlistDir}/${item._name}`);
+            httpGet(item.src)
+              .then(response => response.pipe(songFile))
+              .catch((err) => {
+                console.error(err);
+                process.exit();
+              });
+          }
+        });
       });
     }
   });
