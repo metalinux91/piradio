@@ -244,7 +244,13 @@ socket.on('pause', () => {
     console.log(`${pharmacy.ANF}: received request to pause from server`);
 
     paused = true;
-    player.pause();
+
+    try {
+      player.pause();
+    } catch (error) {
+      console.error(error.toString());
+      process.exit();
+    }
   }
 });
 
@@ -256,7 +262,13 @@ socket.on('resume', () => {
     console.log(`${pharmacy.ANF}: received request to resume from server`);
 
     paused = false;
-    player.pause();
+
+    try {
+      player.pause();
+    } catch (error) {
+      console.error(error.toString());
+      process.exit();
+    }
   }
 });
 
@@ -279,7 +291,13 @@ socket.on('next', () => {
    * shortly after skipping to the next one (thus causing overlap)
    * pause it and set a timeout before skipping
    */
-  player.pause();
+  try {
+    player.pause();
+  } catch (error) {
+    console.error(error.toString());
+    process.exit();
+  }
+
   setTimeout(() => player.next(), 2000);
 });
 
