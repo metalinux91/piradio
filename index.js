@@ -134,7 +134,7 @@ function playerLogs () {
                 if (err.indexOf('Failed') === -1) {
                   process.exit();
 		}
-              })
+              });
           }
         });
       });
@@ -214,8 +214,11 @@ socket.on('play', (msg) => {
 
   msg.playlistLocal.forEach((url, index) => {
     try {
-      fs.statSync(url);
-      finalPlaylist.push(url);
+      if (fs.statSync(url).size === 0) { // if the file does not exist or is empty
+        finalPlaylist.push(msg.playlist[index]);
+      } else {
+        finalPlaylist.push(url);
+      }
     } catch (err) {
       finalPlaylist.push(msg.playlist[index]);
     }
