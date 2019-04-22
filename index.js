@@ -22,7 +22,7 @@ const amixerArray = ['-c', '0', '--', 'sset', 'PCM', 'playback'];
 
 // helper function that gets the songs from the url
 function httpGet(url) {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     https.get(url, (res) => {
       switch(res.statusCode) {
       case 200:
@@ -32,7 +32,7 @@ function httpGet(url) {
         resolve(httpGet(res.headers.location));
         break;
       default:
-        resolve();
+        reject(`Failed to fetch song at ${url}`);
       }
     });
   });
@@ -129,9 +129,12 @@ function playerLogs () {
             httpGet(item.src)
               .then(response => response.pipe(songFile))
               .catch((err) => {
+                fs.unlinkSync(`${playlistDir}/${item._name}`);
                 console.error(err);
-                process.exit();
-              });
+                if (err.indexOf('Failed') === -1) {
+                  process.exit();
+		}
+              })
           }
         });
       });
@@ -145,8 +148,14 @@ function playerLogs () {
       console.log('Reached end of playlist. Restarting...');
       socket.emit('playlistEnd', pharmacy.ANF, playlist);
     } else {
-      console.log({ pharmacy: pharmacy.ANF, message: err });
-      process.exit();
+      if (err.message === 'Resource invalid') {
+        console.log('Cannot play current song; skipping');
+        player.next();
+      } else {
+        console.error({ pharmacy: pharmacy.ANF, message: err });
+        console.log(err.message);
+        process.exit();
+      }
     }
   });
 }
