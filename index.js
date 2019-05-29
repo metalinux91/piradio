@@ -3,21 +3,23 @@ const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
 const io = require('socket.io-client');
-const Player = require('player');
+const mpv = require('node-mpv');
 const getSize = require('get-folder-size');
+
+const mpvPlayer = new mpv({
+  audio_only: true,
+  debug: true,
+  verbose: true
+}, ['--loop=inf', '--no-config', '--load-scripts=no']);
 
 const pharmacy = require('/boot/pharmacy.json');
 
 // const socket = io('http://192.168.2.104:9012', { path: '/piradio' });
 const socket = io('https://servicos.maisfarmacia.org', { path: '/piradio' });
 
-let player;
-let playlist;
 let connected = false;
 let playing = false;
-let paused = false;
 let interval = null;
-let fetchingSong = false;
 const amixerArray = ['-c', '0', '--', 'sset', 'PCM', 'playback'];
 
 // helper function that gets the songs from the url
@@ -67,7 +69,7 @@ const listFiles = (dir, done) => {
 
 // since the process is restarted everyday by a system cronjob
 // remove the songs that have been cached over a month on restart
-fs.stat('../cache', (err, stat) => {
+fs.stat('../cache', (err) => {
   if (!err) {
     listFiles('../cache', (err, files) => {
       files.forEach((file) => {
@@ -92,73 +94,57 @@ fs.stat('../cache', (err, stat) => {
   }
 });
 
-function playerLogs () {
-  // event: on playend
-  player.on('playend', () => {
-    console.log(`${pharmacy.ANF}: play done, switching to next one...`);
-  });
+// event: started
+mpvPlayer.on('started', async () => {
+  playing = true;
+  const songName = await mpvPlayer.getProperty('media-title');
+  const songPath = await mpvPlayer.getProperty('path');
+  console.log(`${pharmacy.ANF}: playing ${songName}`);
 
-  // event: on playing
-  player.on('playing', (item) => {
-    fetchingSong = false;
-    console.log(`${pharmacy.ANF}: playing ${item._name}`);
-    socket.emit('playing', pharmacy.ANF, item);
+  // emit info to server so that pharmacy radio data is updated
+  socket.emit('playing', pharmacy.ANF, { src: songPath });
 
-    // if about to play a commercial, raise the volume, otherwise lower it
-    if (item._name.indexOf('Spot') !== -1) {
-      spawn('amixer', [...amixerArray, '-1dB']);
-    } else {
-      spawn('amixer', [...amixerArray, '-3dB']);
-    }
+  // if about to play a commercial, raise the volume, otherwise lower it
+  if (songName.indexOf('Spot') !== -1) {
+    spawn('amixer', [...amixerArray, '-1dB']);
+  } else {
+    spawn('amixer', [...amixerArray, '-3dB']);
+  }
 
-    // If the song is not cached and there are less than 5GB of cached songs, cache it
-    if (item.src.indexOf('http') !== -1) {
-      fs.stat('../cache', (err, stat) => {
-        if (err) {
-          fs.mkdirSync('../cache');
-        }
-
-        getSize('../cache', (err, size) => {
-          if (err) {
-            console.error(err);
-          } else  if (size < 5000000000) {
-            const playlistDir = `../cache/${item.src.split('/')[4]}`;
-            if (!fs.existsSync(playlistDir)) fs.mkdirSync(playlistDir);
-  
-            const songFile = fs.createWriteStream(`${playlistDir}/${item._name}`);
-            httpGet(item.src)
-              .then(response => response.pipe(songFile))
-              .catch((err) => {
-                fs.unlinkSync(`${playlistDir}/${item._name}`);
-                console.error(err);
-                if (err.indexOf('Failed') === -1) {
-                  process.exit();
-		}
-              });
-          }
-        });
-      });
-    }
-  });
-
-  // event: on error
-  player.on('error', (err) => {
-    // when error occurs
-    if (err.toString() === 'No next song was found') {
-      console.log('Reached end of playlist. Restarting...');
-      socket.emit('playlistEnd', pharmacy.ANF, playlist);
-    } else {
-      if (err.message === 'Resource invalid') {
-        console.log('Cannot play current song; skipping');
-        player.next();
-      } else {
-        console.error({ pharmacy: pharmacy.ANF, message: err });
-        console.log(err.message);
-        process.exit();
+  // If the song is not cached and there are less than 5GB of cached songs, cache it
+  if (songPath.indexOf('http') !== -1) {
+    fs.stat('../cache', (err) => {
+      if (err) {
+        fs.mkdirSync('../cache');
       }
-    }
-  });
-}
+
+      getSize('../cache', async (err, size) => {
+        if (err) {
+          console.error(err);
+        } else  if (size < 5000000000) {
+          const playlistDir = `../cache/${songPath.split('/')[4]}`;
+          if (!fs.existsSync(playlistDir)) fs.mkdirSync(playlistDir);
+
+          const songFile = fs.createWriteStream(`${playlistDir}/${await mpvPlayer.getProperty('filename')}`);
+          httpGet(songPath)
+            .then(response => response.pipe(songFile))
+            .catch((err) => {
+              fs.unlinkSync(`${playlistDir}/${songName}`);
+              console.error(err);
+              if (err.message.indexOf('Failed') === -1) {
+                process.exit();
+              }
+            });
+        }
+      });
+    });
+  }
+});
+
+// when playback events occurs, inform server so that database info is updated
+mpvPlayer.on('paused', () => socket.emit('paused', pharmacy.ANF));
+mpvPlayer.on('stopped', () => socket.emit('stopped', pharmacy.ANF));
+mpvPlayer.on('resumed', () => socket.emit('resumed', pharmacy.ANF));
 
 // event: on connect
 socket.on('connect', () => {
@@ -169,7 +155,7 @@ socket.on('connect', () => {
     clearInterval(interval);
   }
 
-  // inform the server, so that the server may assign it to its particular room
+  // inform the server, so that it may assign it to its particular room
   socket.emit('joinRoom', pharmacy.ANF);
 });
 
@@ -184,34 +170,21 @@ socket.on('disconnect', () => {
   
   // until the device has reconnected, try to connect every 5 seconds
   interval = setInterval(() => {
-    if (!connected) {
-      socket.open();
-    }
+    if (!connected) socket.open();
   }, 5000);
 });
 
 // event: on play
 socket.on('play', (msg) => {
-  if (fetchingSong) {
-    console.log(`${pharmacy.ANF}: is still fetching song to play...`);
-    return;
-  }
-
   if (playing) {
     console.log(`${pharmacy.ANF}: received request to play from server. Restarting playlist or playing new one from the beginning`); 
   } else {
     console.log(`${pharmacy.ANF}: received request to play from server`);
   }
 
+  // build a playlist where the URL of a song is a file it it is cached and an URL otherwise
   playlist = msg.playlist;
-
-  // if the device is already playing, stop
-  if (player !== undefined) {
-    player.stop();
-  }
-
   const finalPlaylist = [];
-
   msg.playlistLocal.forEach((url, index) => {
     try {
       if (fs.statSync(url).size === 0) { // if the file does not exist or is empty
@@ -224,14 +197,36 @@ socket.on('play', (msg) => {
     }
   });
 
-  player = new Player(finalPlaylist);
+  // mpv must be fed a file as playlist so it is necessary to generate a file with a URL per line
+  for (let i = 0; i < finalPlaylist.length; i +=1) {
+    try {
+      fs.appendFileSync('./tmpPlaylist.txt', `${finalPlaylist[i]}\n`);
+    } catch (e) {
+      console.error(e.toString());
+      process.exit();
+    }
+  }
 
-  fetchingSong = true;
-  playing = true;
-  player.play();
+  playing = false;
+  mpvPlayer.loadPlaylist('./tmpPlaylist.txt');
+  mpvPlayer.play();
 
-  // log activity
-  playerLogs();
+  // if after receiving an order to play, playback has not started, try it again, every 15 seconds
+  const intervalId = setInterval(() => {
+    if (playing) {
+      try {
+        fs.unlinkSync('./tmpPlaylist.txt');
+      } catch (e) {
+        console.error(e.toString());
+      }     
+
+      clearInterval(intervalId);
+      return;
+    }
+
+    mpvPlayer.loadPlaylist('./tmpPlaylist.txt');
+    mpvPlayer.play();
+  }, 15000);
 });
 
 // event: on stop
@@ -240,86 +235,52 @@ socket.on('stop', () => {
     console.log(`${pharmacy.ANF}: received request to stop from server, but was already stopped`);
   } else {
     console.log(`${pharmacy.ANF}: received request to stop from server`);
-
-    playing = false;
-    player.stop();
   }
+
+  playing = false;
+  if (interval !== null) clearInterval(interval);
+  mpvPlayer.stop();
+  mpvPlayer.clearPlaylist();
 });
 
 // event: on pause
 socket.on('pause', () => {
-  if (paused) {
-    console.log(`${pharmacy.ANF}: received request to pause from server, but was already paused`);
+  console.log(`${pharmacy.ANF}: received request to pause from server`);
 
-    paused = true;
-  } else {
-    console.log(`${pharmacy.ANF}: received request to pause from server`);
-
-    paused = true;
-
-    try {
-      player.pause();
-    } catch (error) {
-      console.error(error.toString());
-      process.exit();
-    }
+  try {
+    mpvPlayer.pause();
+    if (interval !== null) clearInterval(interval);
+  } catch (error) {
+    console.error(error.toString());
+    process.exit();
   }
 });
 
 // event: on resume
 socket.on('resume', () => {
-  if (!paused) {
-    console.log(`${pharmacy.ANF}: received request to resume from server, but was already playing`);
-  } else {
-    console.log(`${pharmacy.ANF}: received request to resume from server`);
+  console.log(`${pharmacy.ANF}: received request to resume from server`);
 
-    paused = false;
+  paused = false;
 
-    try {
-      player.pause();
-    } catch (error) {
-      console.error(error.toString());
-      process.exit();
-    }
+  try {
+    mpvPlayer.resume();
+  } catch (error) {
+    console.error(error.toString());
+    process.exit();
   }
 });
 
 // event: on next
 socket.on('next', () => {
-  if (fetchingSong) {
-    console.log(`${pharmacy.ANF}: is still fetching song to play...`);
-    return;
-  }
-
   console.log(`${pharmacy.ANF}: received request to skip from server`);
 
-  // resume the player when switching to the next song
-  if (paused) paused = false;
-
-  fetchingSong = true;
-
-  /**
-   * since the player only stops the song that's currently being played
-   * shortly after skipping to the next one (thus causing overlap)
-   * pause it and set a timeout before skipping
-   */
-  try {
-    player.pause();
-  } catch (error) {
-    console.error(error.toString());
-    process.exit();
-  }
-
-  setTimeout(() => player.next(), 2000);
+  mpvPlayer.next();
+  mpvPlayer.play();
 });
 
 
+// comments that applied to "socket.on('play')" are applied here
 socket.on('shuffle', (msg) => {
-  if (fetchingSong) {
-    console.log(`${pharmacy.ANF}: is still fetching song to play...`);
-    return;
-  }
-
   if (playing) {
     console.log(`${pharmacy.ANF}: received request to play from server. Restarting playlist or playing new one from the beginning`); 
   } else {
@@ -327,19 +288,47 @@ socket.on('shuffle', (msg) => {
   }
 
   playlist = msg.playlist;
+  const finalPlaylist = [];
 
-  // if the device is already playing, stop
-  if (player !== undefined) {
-    player.stop();
+  msg.playlistLocal.forEach((url, index) => {
+    try {
+      if (fs.statSync(url).size === 0) {// if the file does not exist or is empty
+        finalPlaylist.push(msg.playlist[index]);
+      } else {
+        finalPlaylist.push(url);
+      }
+    } catch (err) {
+      finalPlaylist.push(msg.playlist[index]);
+    }
+  });
+
+  for (let i = 0; i < finalPlaylist.length; i +=1) {
+    try {
+      fs.appendFileSync('./tmpPlaylist.txt', `${finalPlaylist[i]}\n`);
+    } catch (e) {
+      console.error(e.toString());
+      process.exit();
+    }
   }
 
-  player = new Player(playlist);
+  playing = false;
+  mpvPlayer.loadPlaylist('./tmpPlaylist.txt');
+  mpvPlayer.play();
 
-  fetchingSong = true;
-  playing = true;
-  player.play();
+  const intervalId = setInterval(() => {
+    if (playing) {
+      try {
+        fs.unlinkSync('./tmpPlaylist.txt');
+      } catch (e) {
+        console.error(e.toString());
+      }     
 
-  // log activity
-  playerLogs();
+      clearInterval(intervalId);
+      return;
+    }
+
+    mpvPlayer.loadPlaylist('./tmpPlaylist.txt');
+    mpvPlayer.play();
+  }, 15000);
 });
 

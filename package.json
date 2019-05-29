@@ -14,7 +14,7 @@
   "license": "ISC",
   "dependencies": {
     "get-folder-size": "^2.0.0",
-    "player": "^0.6.1",
+    "node-mpv": "^1.4.3",
     "socket.io-client": "^2.1.1"
   }
 }
