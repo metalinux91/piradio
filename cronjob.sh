@@ -1,11 +1,11 @@
 #!/bin/sh
 echo "\n------------" &&
 echo "$(date)\n" &&
+pm2 stop 0 &&
+rm -rf piradio &&
+git clone https://github.com/metalinux91/piradio.git &&
 sudo apt-get update &&
 sudo apt-get install -y mpv &&
-pm2 stop 0 &&
-rm -rf piradio
-git clone https://github.com/metalinux91/piradio.git &&
 cd ~/piradio &&
 npm install &&
 git checkout package-lock.json &&
