@@ -9,4 +9,4 @@ sudo apt-get install -y mpv &&
 cd ~/piradio &&
 npm install &&
 git checkout package-lock.json &&
-pm2 start piradio/ecosystem.json
+pm2 start ecosystem.json
