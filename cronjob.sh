@@ -1,8 +1,8 @@
 #!/bin/sh
 echo "\n------------" &&
 echo "$(date)\n" &&
-apt-get update &&
-apt-get install -y mpv &&
+sudo apt-get update &&
+sudo apt-get install -y mpv &&
 pm2 stop 0 &&
 rm -rf piradio
 git clone https://github.com/metalinux91/piradio.git &&
