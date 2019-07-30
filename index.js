@@ -67,8 +67,24 @@ const listFiles = (dir, done) => {
   });
 };
 
+// determine whether to delete whole cache or not based on cache size
+let deleteAll = false;
+fs.stat('../cache', (err) => {
+  if (!err) {
+    getSize('../cache', (err, size) => {
+      if (err) {
+        console.error(err);
+        process.exit();
+      } else if (size > 4000000000) {
+        deleteAll = true;
+      }
+    });
+  }
+});
+
 // since the process is restarted everyday by a system cronjob
 // remove the songs that have been cached over a month on restart
+// or if the cache size exceeds 4GB
 fs.stat('../cache', (err) => {
   if (!err) {
     listFiles('../cache', (err, files) => {
@@ -79,8 +95,8 @@ fs.stat('../cache', (err) => {
           } else {
             const { birthtime } = stat;
             const now = new Date();
-  
-            if (now.getMonth() - birthtime.getMonth() > 0) {
+
+            if (deleteAll || now.getMonth() - birthtime.getMonth() > 0) {
               try {
                 fs.unlinkSync(file);
               } catch (error) {
@@ -111,7 +127,7 @@ mpvPlayer.on('started', async () => {
     spawn('amixer', [...amixerArray, '-3dB']);
   }
 
-  // If the song is not cached and there are less than 5GB of cached songs, cache it
+  // If the song is not cached and there are less than 4GB of cached songs, cache it
   if (songPath.indexOf('http') !== -1) {
     fs.stat('../cache', (err) => {
       if (err) {
@@ -121,7 +137,7 @@ mpvPlayer.on('started', async () => {
       getSize('../cache', async (err, size) => {
         if (err) {
           console.error(err);
-        } else  if (size < 5000000000) {
+        } else  if (size < 4000000000) {
           const playlistDir = `../cache/${songPath.split('/')[4]}`;
           if (!fs.existsSync(playlistDir)) fs.mkdirSync(playlistDir);
 
@@ -182,7 +198,7 @@ socket.on('play', (msg) => {
     console.log(`${pharmacy.ANF}: received request to play from server`);
   }
 
-  // build a playlist where the URL of a song is a file it it is cached and an URL otherwise
+  // build a playlist where the URL of a song is a file if it is cached or an URL otherwise
   playlist = msg.playlist;
   const finalPlaylist = [];
   msg.playlistLocal.forEach((url, index) => {
@@ -192,7 +208,7 @@ socket.on('play', (msg) => {
       } else {
         finalPlaylist.push(url);
       }
-    } catch (err) {
+    } catch (err) { // don't know why try catch. Find out and leave comment with reason why
       finalPlaylist.push(msg.playlist[index]);
     }
   });
